@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Neuvillette Banner Simulator</title>
+<style>
+    body {
+        margin: 0;
+        background: #0e1117;
+        color: #e6edf3;
+        font-family: Arial, sans-serif;
+    }
+
+    #controls {
+        padding: 12px;
+        background: #161b22;
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        gap: 10px;
+    }
+
+    label {
+        font-size: 13px;
+    }
+
+    input, button {
+        width: 100%;
+        padding: 6px;
+        background: #0d1117;
+        border: 1px solid #30363d;
+        color: #e6edf3;
+    }
+
+    button {
+        font-weight: bold;
+        cursor: pointer;
+    }
+
+    canvas {
+        width: 100vw;
+        height: calc(100vh - 150px);
+        display: block;
+    }
+</style>
+</head>
+<body>
+
+<div id="controls">
+    <label>Current Pity<input id="pity" type="number" value="30"></label>
+    <label>Guaranteed Featured<input id="guarantee" type="checkbox" checked></label>
+    <label>Total Pulls<input id="pulls" type="number" value="270"></label>
+    <label>Simulations<input id="runs" type="number" value="10000"></label>
+    <label>Target Constellation<input id="const" type="number" value="2"></label>
+    <button onclick="runSim()">Run Simulation</button>
+</div>
+
+<canvas id="canvas"></canvas>
+
+<script>
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+
+function resize() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight - 150;
+}
+window.addEventListener("resize", resize);
+resize();
+
+function runSingle(startPity, guarantee, maxPulls, targetC) {
+    let pity = startPity;
+    let g = guarantee;
+    let featured = 0;
+    let lost = 0;
+    let pullsToTarget = null;
+    let pullsToFirst5 = null;
+    const need = targetC + 1;
+
+    let featuredOverTime = Array(maxPulls).fill(0);
+    let lostOverTime = Array(maxPulls).fill(0);
+
+    for (let i = 0; i < maxPulls; i++) {
+        pity++;
+
+        let fiveStar = pity >= 90 || Math.random() < 0.006;
+        if (fiveStar) {
+            if (pullsToFirst5 === null) pullsToFirst5 = i + 1;
+
+            if (g || Math.random() < 0.5) {
+                featured++;
+                g = false;
+            } else {
+                lost++;
+                g = true;
+            }
+            pity = 0;
+
+            if (featured >= need && pullsToTarget === null) {
+                pullsToTarget = i + 1;
+            }
+        }
+
+        featuredOverTime[i] = featured;
+        lostOverTime[i] = lost;
+    }
+
+    return { featuredOverTime, lostOverTime, pullsToTarget, pullsToFirst5 };
+}
+
+function runSim() {
+    const startPity = +pity.value;
+    const guarantee = document.getElementById("guarantee").checked;
+    const maxPulls = +pulls.value;
+    const runs = +document.getElementById("runs").value;
+    const targetC = +document.getElementById("const").value;
+
+    let featAvg = Array(maxPulls).fill(0);
+    let lostAvg = Array(maxPulls).fill(0);
+    let targetPulls = [];
+    let first5Pulls = [];
+    let success = 0;
+
+    for (let r = 0; r < runs; r++) {
+        const sim = runSingle(startPity, guarantee, maxPulls, targetC);
+
+        for (let i = 0; i < maxPulls; i++) {
+            featAvg[i] += sim.featuredOverTime[i];
+            lostAvg[i] += sim.lostOverTime[i];
+        }
+
+        if (sim.pullsToTarget !== null) {
+            targetPulls.push(sim.pullsToTarget);
+            success++;
+        }
+        if (sim.pullsToFirst5 !== null) {
+            first5Pulls.push(sim.pullsToFirst5);
+        }
+    }
+
+    featAvg = featAvg.map(v => v / runs);
+    lostAvg = lostAvg.map(v => v / runs);
+
+    drawChart(
+        featAvg,
+        lostAvg,
+        avg(targetPulls),
+        avg(first5Pulls),
+        success / runs * 100,
+        targetC,
+        maxPulls
+    );
+}
+
+function avg(arr) {
+    return arr.reduce((a, b) => a + b, 0) / arr.length;
+}
+
+function drawChart(featured, lost, avgTarget, avgFirst5, successPct, targetC, maxPulls) {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    const margin = 80;
+    const w = canvas.width - margin * 2;
+    const h = canvas.height - margin * 2;
+    const maxY = Math.max(...featured) + 0.5;
+
+    ctx.strokeStyle = "#30363d";
+    ctx.fillStyle = "#8b949e";
+    ctx.font = "12px Arial";
+
+    // Grid + labels
+    for (let i = 0; i <= 10; i++) {
+        let y = margin + (h / 10) * i;
+        let val = (maxY * (10 - i) / 10).toFixed(1);
+        ctx.beginPath();
+        ctx.moveTo(margin, y);
+        ctx.lineTo(margin + w, y);
+        ctx.stroke();
+        ctx.fillText(val, 10, y + 4);
+    }
+
+    for (let i = 0; i <= 10; i++) {
+        let x = margin + (w / 10) * i;
+        let val = Math.round(maxPulls * i / 10);
+        ctx.beginPath();
+        ctx.moveTo(x, margin);
+        ctx.lineTo(x, margin + h);
+        ctx.stroke();
+        ctx.fillText(val, x - 10, canvas.height - 40);
+    }
+
+    drawLine(featured, "#58a6ff", maxY);
+    drawLine(lost, "#f85149", maxY);
+
+    drawVLine(avgFirst5, maxPulls, "#a371f7", "Avg first 5★");
+    drawVLine(avgTarget, maxPulls, "#2ea043", `Avg C${targetC} reached`);
+
+    ctx.fillStyle = "#e6edf3";
+    ctx.fillText(`Chance to reach C${targetC}: ${successPct.toFixed(1)}%`, margin, 30);
+    ctx.fillText("Blue = Featured   Red = Lost 50/50", margin, 48);
+}
+
+function drawLine(data, color, maxY) {
+    ctx.strokeStyle = color;
+    ctx.beginPath();
+    data.forEach((v, i) => {
+        let x = 80 + (i / (data.length - 1)) * (canvas.width - 160);
+        let y = canvas.height - 80 - (v / maxY) * (canvas.height - 160);
+        i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+}
+
+function drawVLine(pull, maxPulls, color, label) {
+    if (!pull) return;
+    let x = 80 + (pull / maxPulls) * (canvas.width - 160);
+    ctx.strokeStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(x, 80);
+    ctx.lineTo(x, canvas.height - 80);
+    ctx.stroke();
+    ctx.fillStyle = color;
+    ctx.fillText(label, x + 5, 95);
+}
+</script>
+
+</body>
+</html>
